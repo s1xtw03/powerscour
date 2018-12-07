@@ -3,7 +3,7 @@
     This script attempts to search files on SMB shares for strings of text. It takes a list of hosts, a list of credentials to try authenticating with, and a list of strings to search for.  
 
 .DESCRIPTION
-    We want to try every share, with every set of credentials, and we don't want to spend much time looking through large files, DLLs, or other binary stuff.
+    We want to try every share, with every set of credentials, and we don't want to spend much time looking through large files or binary stuff.
 
 .EXAMPLE
     .\PowerSack.ps1 -HostListFile .\hosts.txt -KeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt
@@ -30,6 +30,9 @@
     localusername1:password1
     DOMAIN\username2:password2
 
+.PARAMETER InfoOnly
+    Set this switch if you only want to return accessible share names without scanning for any content. 
+
 .PARAMETER IgnoreFileNamePatterns
     Comma-separated list of filename patterns to ignore. 
     By default, this script ignores several file extensions, detailed in the AllFileExtensions parameter description.
@@ -41,6 +44,9 @@
     Comma-separated list of filename patterns to search; anything that does not match will not be searched.
     Example: *.txt,*Financials*,*.bat,*.xml
     Will throw a Parameter set error if used with the other name filter parameters.
+
+.PARAMETER IgnoreShareNames
+    Comma-separated list of share names to ignore. 
 
 .PARAMETER MaxFileSize
     Maximum file size to scan. Defaults to 25MB. 
@@ -60,6 +66,10 @@
 #>
 #To see the help page formatted nicely, Run:  Get-Help .\PowerSack.ps1 -Full
 
+##TODO Only scan a file once##
+##TODO Provide different filters for extensions/names 
+##TODO find a more stylish way to 
+
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$True)]
@@ -74,10 +84,11 @@ param(
     [string []] $SpecificFileNamePatterns,
     [Parameter(ParameterSetName="setc")]
     [switch] $AllFileExtensions,
+    [switch] $InfoOnly,
     $MaxFileSize=25MB
 )
 
-$AutoExcluded = @("*.dll", "*.exe", "*.msi", "*.dmg", "*.png", "*.gif", "*.mp4", "*.jpg", "*.rar", "*.zip", "*.iso", "*.bin", "*.avi", "*.mkv")
+$AutoExcluded = @("*.dll", "*.exe", "*.msi", "*.dmg", "*.png", "*.gif", "*.h", "*.mp4", "*.jpg", "*.rar", "*.zip", "*.iso", "*.bin", "*.avi", "*.mkv", "*.git", "*.svn")
 
 try 
 {
@@ -95,16 +106,12 @@ catch [System.Exception]
 function Test-SMBPortConnection
 {
     Param([string]$srv,$port=445,$timeout=1000,[switch]$verbose)
-
     # Create TCP Client
     $tcpclient = new-Object system.Net.Sockets.TcpClient
-
     # Tell TCP Client to connect to machine on Port
     $iar = $tcpclient.BeginConnect($srv,$port,$null,$null)
-
     # Set the wait time
     $wait = $iar.AsyncWaitHandle.WaitOne($timeout,$false)
-
     # Check to see if the connection is done
     if(!$wait)
     {
@@ -120,7 +127,6 @@ function Test-SMBPortConnection
         $tcpclient.EndConnect($iar) | out-Null
         $tcpclient.Close()
     }
-
     # Return $true if connection Establish else $False
     if($failed){return $false}else{return $true}
 }
@@ -140,8 +146,15 @@ foreach ($CurrentHost in $Hosts)
         $CurrentPassword = $CurrentCredential.split(":")[1]
 
         Write-Output "Connecting as $CurrentUser@$CurrentHost"
+
         #establish the smb mapping
-        net use \\$CurrentHost\IPC$ /user:$CurrentUser "$CurrentPassword" /persistent:no | Out-Null
+        net use \\$CurrentHost\IPC$ /user:$CurrentUser "$CurrentPassword" /persistent:no 2>$null | Out-Null
+        
+        #Check the AUTOMATIC VARIABLE https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables
+        if ($LASTEXITCODE -ne 0) {
+            Write-Output "Could not map $CurrentHost as $CurrentUser. Moving on."
+            continue
+        }
 
         #give that a second and parse the shares
         Start-Sleep -Seconds 1
@@ -149,6 +162,7 @@ foreach ($CurrentHost in $Hosts)
 
         $PrintableShares = $Shares -join ', '
         Write-Verbose "Found the following shares: $PrintableShares"
+        $FilteredShares = $Shares | Where-Object {$_ -ne "C$"} | Where-Object {$_ -ne "ADMIN$"} | Where-Object {$_ -ne "print$"} | Where-Object {}
 
         foreach ($CurrentShare in $Shares)
         {
@@ -156,6 +170,13 @@ foreach ($CurrentHost in $Hosts)
             try 
             {
                 Get-Childitem -path \\$CurrentHost\$CurrentShare -ErrorAction Stop | Out-Null
+
+                #InfoOnly prints the shares and leaves
+                if($InfoOnly)
+                {
+                    Write-Output "Super! $CurrentUser has read access to $CurrentShare"
+                    continue
+                }
             }
             catch
             {
@@ -163,10 +184,10 @@ foreach ($CurrentHost in $Hosts)
                 continue
             }
 
+            
+            $AllFSObjects = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -Force -ErrorAction SilentlyContinue
             Write-Verbose "Super! $CurrentUser does have read access to $CurrentShare"
-
-            #Check file and directory names for keywords
-            $AllFSObjects = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -Force 
+            
             foreach($FSObject in $AllFSObjects)
             {
                 foreach ($CurrentKeyword in $Keywords)
