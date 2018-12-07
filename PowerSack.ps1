@@ -140,6 +140,10 @@ foreach ($CurrentHost in $Hosts)
         continue
     }
 
+    #using these lists to keep track of what we have already scanned for output trimming
+    $ScannedFiles = @()
+    $NameScanned = @()
+
     foreach ($CurrentCredential in $Credentials)
     {
         $CurrentUser = $CurrentCredential.split(":")[0]
@@ -162,32 +166,26 @@ foreach ($CurrentHost in $Hosts)
 
         $PrintableShares = $Shares -join ', '
         Write-Verbose "Found the following shares: $PrintableShares"
-        $FilteredShares = $Shares | Where-Object {$_ -ne "C$"} | Where-Object {$_ -ne "ADMIN$"} | Where-Object {$_ -ne "print$"} | Where-Object {}
-
+        $FilteredShares = $Shares | Where-Object {$_ -ne "C$"} | Where-Object {$_ -ne "ADMIN$"} | Where-Object {$_ -ne "print$"} 
+        
         foreach ($CurrentShare in $Shares)
         {
             #test if I have read access
             try 
             {
                 Get-Childitem -path \\$CurrentHost\$CurrentShare -ErrorAction Stop | Out-Null
-
+                Write-Verbose "Super! $CurrentUser does have read access to $CurrentShare"
                 #InfoOnly prints the shares and leaves
-                if($InfoOnly)
-                {
-                    Write-Output "Super! $CurrentUser has read access to $CurrentShare"
-                    continue
-                }
+                if($InfoOnly) { continue }
             }
             catch
             {
                 Write-Verbose "$CurrentUser does not have read access to $CurrentShare T_T"
                 continue
             }
-
             
-            $AllFSObjects = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Verbose "Super! $CurrentUser does have read access to $CurrentShare"
-            
+            $AllFSObjects = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {$_.FullName -notin $NameScanned }
+           
             foreach($FSObject in $AllFSObjects)
             {
                 foreach ($CurrentKeyword in $Keywords)
@@ -196,13 +194,14 @@ foreach ($CurrentHost in $Hosts)
                     if ($FSObject.Name -like $WildCardKeyword)
                     {
                         $FSObjectPath = $FSObject.FullName
-                        Write-Output "Keyword match in filesystem path: $FObjectPath" 
+                        Write-Output "Keyword match in filesystem path: $FSObjectPath" 
+                        $NameScanned += $FSObjectPath
                     }
                 }
             }
 
             ########File Filtering Time!!!!!!!!
-            if ($AllFileExtensions) #why?whatever man 
+            if ($AllFileExtensions) #why? whatever man 
             {
                 $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -File -Recurse -Force 
             }
@@ -220,13 +219,16 @@ foreach ($CurrentHost in $Hosts)
             }
 
             #no more large files
-            $FilteredFiles = Where-Object {$_.Length -lt $MaxFileSize} -InputObject $FilteredFiles 
+            $FilteredFiles = $FilteredFiles | Where-Object {$_.Length -lt $MaxFileSize}
+            #and no repeats.
+            $FilteredFiles = $FilteredFiles | Where-Object {$_.FullName -notin $ScannedFiles}
 
             #ok actually search now
             foreach($CurrentKeyword in $Keywords)
             {
                 foreach($FFile in $FilteredFiles)
                 {
+                    $ScannedFiles += $FFile.FullName
                     Select-String -ErrorAction 'SilentlyContinue'-pattern "$CurrentKeyword" $FFile
                 }
             }
