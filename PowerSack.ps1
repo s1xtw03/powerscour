@@ -57,6 +57,9 @@
     ("*.dll", "*.exe", "*.msi", "*.dmg", "*.png", "*.gif", "*.mp4", "*.jpg", "*.rar", "*.zip", "*.iso", "*.bin", "*.avi", "*.mkv")
     Will throw a Parameter set error if used with the other name filter parameters.
 
+.PARAMETER ShowShareRootContents
+    If a share was accessible, print its root directory contents.
+
 .LINK
     https://en.wikipedia.org/wiki/Samba
 .LINK
@@ -66,9 +69,12 @@
 #>
 #To see the help page formatted nicely, Run:  Get-Help .\PowerSack.ps1 -Full
 
-##TODO Only scan a file once##
-##TODO Provide different filters for extensions/names 
-##TODO find a more stylish way to 
+##TODO Provide different filters for extensions/names
+##TODO Can I scan filenames and contents at the same time
+##TODO Use Windows Auth Too ANd UnAuth 
+##TODO Better way to handle file read errors (-ErrorAction Silently COntinue?)
+##TODO add some default keywords
+##TODO Use PSDrive instead of net use /view
 
 [CmdletBinding()]
 param(
@@ -84,11 +90,14 @@ param(
     [string []] $SpecificFileNamePatterns,
     [Parameter(ParameterSetName="setc")]
     [switch] $AllFileExtensions,
+    [string []] $IgnoreShareNames,
     [switch] $InfoOnly,
+    [switch] $ShowShareRootContents,
     $MaxFileSize=25MB
 )
 
-$AutoExcluded = @("*.dll", "*.exe", "*.msi", "*.dmg", "*.png", "*.gif", "*.h", "*.mp4", "*.jpg", "*.rar", "*.zip", "*.iso", "*.bin", "*.avi", "*.mkv", "*.git", "*.svn")
+$AutoExcludedExtensions = @("*.dll.*", "*.dll", "*.exe.*", "*.exe", "*.msi", "*.dmg", "*.png", "*.pdb", "*.pdb.*", "*.gif", "*.h", "*.mp4", "*.adml", "*.jpg", "*.rar", "*.zip", "*.iso", "*.bin", "*.avi", "*.mkv", "*.git", "*.svn", "*.7z")
+$AutoExcludedShares = @("C$", "ADMIN$", "print$")
 
 try 
 {
@@ -99,6 +108,11 @@ try
 catch [System.Exception]
 {
     throw "An error already! Those files are _unreadable_."
+}
+
+if($IgnoreShareNames)
+{
+  $IgnoredShares = $AutoExcludedShares + $IgnoreShareNames
 }
 
 # robbed from https://web.archive.org/web/20150405035615/http://poshcode.org/85
@@ -131,8 +145,26 @@ function Test-SMBPortConnection
     if($failed){return $false}else{return $true}
 }
 
+function Write-Verbose-Timestamp
+{
+  Param([string]$Message="")
+  $Timestamp = Get-Date -UFormat "%m/%d %T"
+  Write-Verbose "[$Timestamp] $Message"
+}
+
+function Write-Output-Timestamp
+{
+  Param([string]$Message="")
+  $Timestamp = Get-Date -UFormat "%m/%d %T"
+  Write-Output "[$Timestamp] $Message"
+}
+
+$CurrentDate = Get-Date
+Write-Output "Starting scan at $CurrentDate" 
+
 foreach ($CurrentHost in $Hosts)
 {
+    Write-Verbose-Timestamp "Connecting to $CurrentHost..."
     #check connection quickly
     if (-Not (Test-SMBPortConnection($CurrentHost)))
     {
@@ -144,44 +176,67 @@ foreach ($CurrentHost in $Hosts)
     $ScannedFiles = @()
     $NameScanned = @()
 
+    #Hashmap where ShareName is key, list of users with access is value.
+    $AccessTable = @{}
+
     foreach ($CurrentCredential in $Credentials)
     {
         $CurrentUser = $CurrentCredential.split(":")[0]
         $CurrentPassword = $CurrentCredential.split(":")[1]
 
-        Write-Output "Connecting as $CurrentUser@$CurrentHost"
+        Write-Verbose-Timestamp("Connecting as $CurrentUser@$CurrentHost")
 
         #establish the smb mapping
         net use \\$CurrentHost\IPC$ /user:$CurrentUser "$CurrentPassword" /persistent:no 2>$null | Out-Null
         
         #Check the AUTOMATIC VARIABLE https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables
         if ($LASTEXITCODE -ne 0) {
-            Write-Output "Could not map $CurrentHost as $CurrentUser. Moving on."
+            Write-Verbose "Could not map $CurrentHost as $CurrentUser. Moving on."
             continue
         }
 
         #give that a second and parse the shares
         Start-Sleep -Seconds 1
         $Shares = net view \\$CurrentHost /all | where {$_ -match 'disk*'} | foreach {$_ -match '^(.+?)\s+Disk*'| out-null;$matches[1]}
+        $FilteredShares = $Shares | Where-Object {$_ -notin $IgnoredShares } 
 
         $PrintableShares = $Shares -join ', '
-        Write-Verbose "Found the following shares: $PrintableShares"
-        $FilteredShares = $Shares | Where-Object {$_ -ne "C$"} | Where-Object {$_ -ne "ADMIN$"} | Where-Object {$_ -ne "print$"} 
+        $PrintableFilteredShares = $FilteredShares -join ', '
+
+        Write-Verbose-Timestamp("Found the following shares: $PrintableShares")
+        Write-Verbose-Timestamp("After share filtering, only scanning files in: $PrintableFilteredShares")
         
         foreach ($CurrentShare in $Shares)
         {
+            #if the share isn't in the access table as a key, add that with an empty list val.
+            if ( -Not ($AccessTable.ContainsKey($CurrentShare)))
+            {
+              $AccessTable[$CurrentShare] = @(@(), @())
+            }
+
             #test if I have read access
             try 
             {
-                Get-Childitem -path \\$CurrentHost\$CurrentShare -ErrorAction Stop | Out-Null
-                Write-Verbose "Super! $CurrentUser does have read access to $CurrentShare"
-                #InfoOnly prints the shares and leaves
-                if($InfoOnly) { continue }
+                $TopLevelDirectories = Get-Childitem -path \\$CurrentHost\$CurrentShare -ErrorAction Stop 
+                $AccessTable[$CurrentShare][0] += $CurrentUser
+
+                if ($AccessTable[$CurrentShare][1].Length -lt 1)
+                {
+                  $AccessTable[$CurrentShare][1] += $TopLevelDirectories
+                }
+
+                Write-Verbose-Timestamp("Super! $CurrentUser does have read access to $CurrentShare")
             }
             catch
             {
-                Write-Verbose "$CurrentUser does not have read access to $CurrentShare T_T"
+                Write-Verbose-Timestamp("$CurrentUser does not have read access to $CurrentShare")
                 continue
+            }
+
+            if($InfoOnly) { continue }
+            if( -Not ($FilteredShares -Contains $CurrentShare)) { 
+              Write-Verbose-Timestamp("Not scanning files in $CurrentShare as due to filter")
+              continue 
             }
             
             $AllFSObjects = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {$_.FullName -notin $NameScanned }
@@ -203,18 +258,18 @@ foreach ($CurrentHost in $Hosts)
             ########File Filtering Time!!!!!!!!
             if ($AllFileExtensions) #why? whatever man 
             {
-                $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -File -Recurse -Force 
+                $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -File -Recurse -Force -ErrorAction SilentlyContinue
             }
             else 
             {
                 if($SpecificFileNamePatterns)
                 {
-                    $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -File -Force -Include $SpecificFileNamePatterns 
+                    $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -File -Force -ErrorAction SilentlyContinue -Include $SpecificFileNamePatterns 
                 }
                 else 
                 {
-                    $IgnoredPatterns = $IgnoreFileNamePatterns + $AutoExcluded
-                    $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -File -Force -Exclude $IgnoredPatterns 
+                    $IgnoredPatterns = $IgnoreFileNamePatterns + $AutoExcludedExtensions
+                    $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -File -Force -ErrorAction SilentlyContinue -Exclude $IgnoredPatterns 
                 }
             }
 
@@ -228,8 +283,13 @@ foreach ($CurrentHost in $Hosts)
             {
                 foreach($FFile in $FilteredFiles)
                 {
-                    $ScannedFiles += $FFile.FullName
-                    Select-String -ErrorAction 'SilentlyContinue'-pattern "$CurrentKeyword" $FFile
+                    try {
+                      Select-String -ErrorAction 'Stop'-pattern "$CurrentKeyword" $FFile
+                      $ScannedFiles += $FFile.FullName
+                    }
+                    catch{
+                      continue
+                    }
                 }
             }
         }
@@ -241,4 +301,14 @@ foreach ($CurrentHost in $Hosts)
         Write-Verbose "Done with $CurrentUser@$CurrentHost"
         Start-Sleep -Seconds 1
     } 
+
+  Write-Output "Share access info for $CurrentHost :"
+  
+  if($ShowShareRootContents)
+  {
+    $AccessTable | Format-Table -AutoSize -Wrap @{Label="Share Name"; Expression={Write-Output $_.Key}}, @{Label="Users With Access"; Expression={$_.Value[0] | Out-String -Width 1000}}, @{Label="Top Level Directory Contents"; Expression={$_.Value[1] | Select-Object -Property Name | Out-String -Width 1000}}
+  }
+  else {
+    $AccessTable | Format-Table -AutoSize -Wrap @{Label="Share Name"; Expression={Write-Output $_.Key}}, @{Label="Users With Access"; Expression={$_.Value[0] | Out-String -Width 1000}}
+  }
 }
