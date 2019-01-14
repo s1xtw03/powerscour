@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     This script attempts to search files on SMB shares for strings of text. It takes a list of hosts, a list of credentials to try authenticating with, and a list of strings to search for.  
 
@@ -49,7 +49,7 @@
     Comma-separated list of share names to ignore. 
 
 .PARAMETER MaxFileSize
-    Maximum file size to scan. Defaults to 25MB. 
+    Maximum file size to scan. Defaults to 5MB. 
     This thing can be an integer representing number of bytes, or human shorthand for larger quantities, like 2MB, 2GB, 2TB, etc. 
 
 .PARAMETER AllFileExtensions
@@ -61,7 +61,7 @@
     If a share was accessible, print its root directory contents.
 
 .LINK
-    https://en.wikipedia.org/wiki/Samba
+    https://www.youtube.com/watch?v=nA5WsSyO2BM
 .LINK
     https://en.wikipedia.org/wiki/Acabou_Chorare
 .LINK
@@ -84,16 +84,13 @@ param(
     [string] $KeywordListFile,
     [Parameter(Mandatory=$True)]
     [string] $CredentialListFile,
-    [Parameter(ParameterSetName="seta")]
     [string []] $IgnoreFileNamePatterns,
-    [Parameter(ParameterSetName="setb")]
     [string []] $SpecificFileNamePatterns,
-    [Parameter(ParameterSetName="setc")]
     [switch] $AllFileExtensions,
     [string []] $IgnoreShareNames,
     [switch] $InfoOnly,
     [switch] $ShowShareRootContents,
-    $MaxFileSize=25MB
+    $MaxFileSize=5MB
 )
 
 $AutoExcludedExtensions = @("*.dll.*", "*.dll", "*.exe.*", "*.exe", "*.msi", "*.dmg", "*.png", "*.pdb", "*.pdb.*", "*.gif", "*.h", "*.mp4", "*.adml", "*.jpg", "*.rar", "*.zip", "*.iso", "*.bin", "*.avi", "*.mkv", "*.git", "*.svn", "*.7z")
@@ -110,9 +107,16 @@ catch [System.Exception]
     throw "An error already! Those files are _unreadable_."
 }
 
+#If additional share names are provided to ignore, add them to our autoexclude list
 if($IgnoreShareNames)
 {
   $IgnoredShares = $AutoExcludedShares + $IgnoreShareNames
+}
+
+#This is like ParameterSets, but uglier. There's gotta be a better way 
+if( ($IgnoreFileNamePatterns -and ($SpecificFileNamePatterns -or $AllFileExtensions)) -or ($SpecificFileNamePatterns -and ($IgnoreFileNamePatterns -or $AllFileExtensions)) -or ($AllFileExtensions -and ($IgnoreFileNamePatterns -or $SpecificFileNamePatterns)))
+{
+  throw "You provided too many file name pattern options. There should only be one of: [IgnoreFileNamePatterns, SpecificFileNamePatterns, AllFileExtensions]"
 }
 
 # robbed from https://web.archive.org/web/20150405035615/http://poshcode.org/85
@@ -159,8 +163,7 @@ function Write-Output-Timestamp
   Write-Output "[$Timestamp] $Message"
 }
 
-$CurrentDate = Get-Date
-Write-Output "Starting scan at $CurrentDate" 
+Write-Output-Timestamp "Starting scan!" 
 
 foreach ($CurrentHost in $Hosts)
 {
@@ -220,9 +223,9 @@ foreach ($CurrentHost in $Hosts)
                 $TopLevelDirectories = Get-Childitem -path \\$CurrentHost\$CurrentShare -ErrorAction Stop 
                 $AccessTable[$CurrentShare][0] += $CurrentUser
 
-                if ($AccessTable[$CurrentShare][1].Length -lt 1)
+                if ($AccessTable[$CurrentShare][1].Length -lt $TopLevelDirectories.Length)
                 {
-                  $AccessTable[$CurrentShare][1] += $TopLevelDirectories
+                  $AccessTable[$CurrentShare][1] = $TopLevelDirectories
                 }
 
                 Write-Verbose-Timestamp("Super! $CurrentUser does have read access to $CurrentShare")
@@ -241,6 +244,8 @@ foreach ($CurrentHost in $Hosts)
             
             $AllFSObjects = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {$_.FullName -notin $NameScanned }
            
+
+            #check keyword matches in filenames
             foreach($FSObject in $AllFSObjects)
             {
                 foreach ($CurrentKeyword in $Keywords)
@@ -302,7 +307,7 @@ foreach ($CurrentHost in $Hosts)
         Start-Sleep -Seconds 1
     } 
 
-  Write-Output "Share access info for $CurrentHost :"
+  Write-Output-Timestamp "Share access info for $CurrentHost :"
   
   if($ShowShareRootContents)
   {
