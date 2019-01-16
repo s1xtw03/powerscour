@@ -9,6 +9,11 @@
     .\PowerSack.ps1 -HostListFile .\hosts.txt -KeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt
     Authenticate to all of the hosts listed in hosts.txt as all of the users in credentials.txt, and search for all of the strings listed in keywords.txt 
 
+.EXAMPLE 
+    .\PowerSack.ps1 -HostlistFIle .\hosts.txt -CredentialListFile .\credentials.txt -InfoOnly
+    Authenticate to shares as the current shell user and skip scanning - return information about user access and a file list for each share.
+    Recommended to run this first if you're in a large, unfamiliar environment.
+
 .EXAMPLE
     .\PowerSack.ps1 -HostListFile .\hosts.txt -KeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -MaxFileSize 200MB -IgnoreFileNamePatterns *.pshh,*Wack*
     Same as above but increase file size filter and exclude files with Wack in the name, or ending with .pshh, in addition to default exclude list. 
@@ -18,8 +23,8 @@
     Same as example 1 but include verbose details, redirect verbose and stdout to a file. FTW!
 
 .PARAMETER HostListFile
-    A file containing a newline-separated list of hosts. Hosts can be described by IP address or a resolvable name. I don't yet support ranges, entries must be explicit. EZ turn range into IP list hint: 
-    nmap -sL -n <YOUR-CIDR> | egrep -o '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'
+    A file containing a newline-separated list of hosts. Hosts can be described by IP address or a resolvable name. I don't yet support ranges, entries must be explicit. 
+    EZ turn range into IP list hint: nmap -sL -n <YOUR-CIDR> | egrep -o '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'
 
 .PARAMETER KeywordListFile
     A file containing a newline-separated list of strings to search for. Seach will be case insensitive.
@@ -31,7 +36,10 @@
     DOMAIN\username2:password2
 
 .PARAMETER InfoOnly
-    Set this switch if you only want to return accessible share names without scanning for any content. 
+    Set this switch if you only want to return accessible share names and top-level files without scanning for strings.
+
+.PARAMETER UseWindowsAuth
+    Set this switch if you want to use the current windows user instead of a credential list file.
 
 .PARAMETER IgnoreFileNamePatterns
     Comma-separated list of filename patterns to ignore. 
@@ -58,7 +66,7 @@
     Will throw a Parameter set error if used with the other name filter parameters.
 
 .PARAMETER ShowShareRootContents
-    If a share was accessible, print its root directory contents.
+    If a share was accessible, print its root directory contents. This is on by default if you do -InfoOnly, but not if you're doing a keyword scan.
 
 .LINK
     https://www.youtube.com/watch?v=nA5WsSyO2BM
@@ -75,20 +83,20 @@
 ##TODO Better way to handle file read errors (-ErrorAction Silently COntinue?)
 ##TODO add some default keywords
 ##TODO Use PSDrive instead of net use /view
+##TODO Choose user for TLD 
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$True)]
     [string] $HostListFile,
-    [Parameter(Mandatory=$True)]
     [string] $KeywordListFile,
-    [Parameter(Mandatory=$True)]
     [string] $CredentialListFile,
     [string []] $IgnoreFileNamePatterns,
     [string []] $SpecificFileNamePatterns,
     [switch] $AllFileExtensions,
     [string []] $IgnoreShareNames,
     [switch] $InfoOnly,
+    [switch] $UseWindowsAuth,
     [switch] $ShowShareRootContents,
     $MaxFileSize=5MB
 )
@@ -96,27 +104,58 @@ param(
 $AutoExcludedExtensions = @("*.dll.*", "*.dll", "*.exe.*", "*.exe", "*.msi", "*.dmg", "*.png", "*.pdb", "*.pdb.*", "*.gif", "*.h", "*.mp4", "*.adml", "*.jpg", "*.rar", "*.zip", "*.iso", "*.bin", "*.avi", "*.mkv", "*.git", "*.svn", "*.7z")
 $AutoExcludedShares = @("C$", "ADMIN$", "print$")
 
+$Hosts = @()
+$Keywords = @()
+$Credentials = @()
+
+############ Validate Input Parameters #$#####
 try 
 {
-    $Hosts = Get-Content -Path $HostListFile -ErrorAction Stop
-    $Keywords = Get-Content -Path $KeywordListFile -ErrorAction Stop
-    $Credentials = Get-Content -Path $CredentialListFile -ErrorAction Stop
+    if($HostListFile)
+    {
+      $Hosts = Get-Content -Path $HostListFile -ErrorAction Stop
+    }
+    if($KeywordListFile)
+    {
+      $Keywords = Get-Content -Path $KeywordListFile -ErrorAction Stop
+    }
+    if($CredentialListFile)
+    {
+      $Credentials = Get-Content -Path $CredentialListFile -ErrorAction Stop
+    }
 }
 catch [System.Exception]
 {
-    throw "An error already! Those files are _unreadable_."
+    throw "An error already! The HostListFile, KeywordListFile, or CredentialListFile is _unreadable_."
 }
 
-#If additional share names are provided to ignore, add them to our autoexclude list
-if($IgnoreShareNames)
+if ( (-not $InfoOnly) -and (-not $KeywordListFile) )
 {
-  $IgnoredShares = $AutoExcludedShares + $IgnoreShareNames
+  throw "You have to specify either -InfoOnly or -KeywordListFile"
 }
 
 #This is like ParameterSets, but uglier. There's gotta be a better way 
 if( ($IgnoreFileNamePatterns -and ($SpecificFileNamePatterns -or $AllFileExtensions)) -or ($SpecificFileNamePatterns -and ($IgnoreFileNamePatterns -or $AllFileExtensions)) -or ($AllFileExtensions -and ($IgnoreFileNamePatterns -or $SpecificFileNamePatterns)))
 {
   throw "You provided too many file name pattern options. There should only be one of: [IgnoreFileNamePatterns, SpecificFileNamePatterns, AllFileExtensions]"
+}
+
+if( (-Not $UseWindowsAuth) -and (-not $CredentialListFile))
+{
+  throw "You have to specify either -UseWindowsAuth or -CredentialListFile"
+}
+
+if($UseWindowsAuth)
+{
+  $Credentials += "Windows"
+}
+
+#########################################
+
+#If additional share names are provided to ignore, add them to our autoexclude list
+if($IgnoreShareNames)
+{
+  $IgnoredShares = $AutoExcludedShares + $IgnoreShareNames
 }
 
 # robbed from https://web.archive.org/web/20150405035615/http://poshcode.org/85
@@ -182,21 +221,35 @@ foreach ($CurrentHost in $Hosts)
     #Hashmap where ShareName is key, list of users with access is value.
     $AccessTable = @{}
 
+    #Did did any user successfully map?
+    $HostMapped = 0
+
     foreach ($CurrentCredential in $Credentials)
     {
-        $CurrentUser = $CurrentCredential.split(":")[0]
-        $CurrentPassword = $CurrentCredential.split(":")[1]
+        if($CurrentCredential -eq "Windows")
+        {
+          $CurrentUser = whoami
+          Write-Verbose-Timestamp("Connecting as $CurrentUser@$CurrentHost")
+          #This echo pipe thing is to pass the prompt net use gives if the creds fail. 
+          echo '' | net use \\$CurrentHost\IPC$ /persistent:no 2>$null | Out-Null
+        }
+        else {
+          $CurrentUser = $CurrentCredential.split(":")[0]
+          $CurrentPassword = $CurrentCredential.split(":")[1]
 
-        Write-Verbose-Timestamp("Connecting as $CurrentUser@$CurrentHost")
+          Write-Verbose-Timestamp("Connecting as $CurrentUser@$CurrentHost")
 
-        #establish the smb mapping
-        net use \\$CurrentHost\IPC$ /user:$CurrentUser "$CurrentPassword" /persistent:no 2>$null | Out-Null
+          #establish the smb mapping
+          net use \\$CurrentHost\IPC$ /user:$CurrentUser "$CurrentPassword" /persistent:no 2>$null | Out-Null
+        }
         
         #Check the AUTOMATIC VARIABLE https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_automatic_variables
         if ($LASTEXITCODE -ne 0) {
             Write-Verbose "Could not map $CurrentHost as $CurrentUser. Moving on."
             continue
         }
+
+        $HostMapped = 1
 
         #give that a second and parse the shares
         Start-Sleep -Seconds 1
@@ -220,7 +273,7 @@ foreach ($CurrentHost in $Hosts)
             #test if I have read access
             try 
             {
-                $TopLevelDirectories = Get-Childitem -path \\$CurrentHost\$CurrentShare -ErrorAction Stop 
+                $TopLevelDirectories = Get-Childitem -Force -path \\$CurrentHost\$CurrentShare -ErrorAction Stop 
                 $AccessTable[$CurrentShare][0] += $CurrentUser
 
                 if ($AccessTable[$CurrentShare][1].Length -lt $TopLevelDirectories.Length)
@@ -232,6 +285,8 @@ foreach ($CurrentHost in $Hosts)
             }
             catch
             {
+                #$ErrorMessage = $_.Exception.Message
+                #Write-Verbose-Timestamp("Error: $ErrorMessage")
                 Write-Verbose-Timestamp("$CurrentUser does not have read access to $CurrentShare")
                 continue
             }
@@ -243,7 +298,6 @@ foreach ($CurrentHost in $Hosts)
             }
             
             $AllFSObjects = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {$_.FullName -notin $NameScanned }
-           
 
             #check keyword matches in filenames
             foreach($FSObject in $AllFSObjects)
@@ -307,11 +361,16 @@ foreach ($CurrentHost in $Hosts)
         Start-Sleep -Seconds 1
     } 
 
+  if($HostMapped -eq 0)
+  {
+    continue
+  }
+
   Write-Output-Timestamp "Share access info for $CurrentHost :"
   
-  if($ShowShareRootContents)
+  if($ShowShareRootContents -or $InfoOnly)
   {
-    $AccessTable | Format-Table -AutoSize -Wrap @{Label="Share Name"; Expression={Write-Output $_.Key}}, @{Label="Users With Access"; Expression={$_.Value[0] | Out-String -Width 1000}}, @{Label="Top Level Directory Contents"; Expression={$_.Value[1] | Select-Object -Property Name | Out-String -Width 1000}}
+    $AccessTable | Format-Table -AutoSize -Wrap @{Label="Share Name"; Expression={Write-Output $_.Key}}, @{Label="Users With Access"; Expression={$_.Value[0] | Out-String -Width 1000}}, @{Label="Top Level Directory Contents"; Expression={$_.Value[1] | Select -ExpandProperty Name | Out-String -Width 1000}}
   }
   else {
     $AccessTable | Format-Table -AutoSize -Wrap @{Label="Share Name"; Expression={Write-Output $_.Key}}, @{Label="Users With Access"; Expression={$_.Value[0] | Out-String -Width 1000}}
