@@ -3,3 +3,7 @@ id_*
 *assword*
 shadow
 passwd
+*.key
+*.pem
+*.pfx
+users*.xml
