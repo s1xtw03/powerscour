@@ -1,0 +1,5 @@
+PRIVATE KEY
+aws_secret_access_key
+privatekey
+ovpn
+cpassword

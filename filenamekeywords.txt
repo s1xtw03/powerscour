@@ -1,0 +1,5 @@
+*.ovpn
+id_*
+*assword*
+shadow
+passwd

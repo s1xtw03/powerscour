@@ -6,7 +6,7 @@
     We want to try every share, with every set of credentials, and we don't want to spend much time looking through large files or binary stuff.
 
 .EXAMPLE
-    .\PowerSack.ps1 -HostListFile .\hosts.txt -KeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt
+    .\PowerSack.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt
     Authenticate to all of the hosts listed in hosts.txt as all of the users in credentials.txt, and search for all of the strings listed in keywords.txt 
 
 .EXAMPLE 
@@ -15,19 +15,23 @@
     Recommended to run this first if you're in a large, unfamiliar environment.
 
 .EXAMPLE
-    .\PowerSack.ps1 -HostListFile .\hosts.txt -KeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -MaxFileSize 200MB -IgnoreFileNamePatterns *.pshh,*Wack*
+    .\PowerSack.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -MaxFileSize 200MB -IgnoreFileNamePatterns *.pshh,*Wack*
     Same as above but increase file size filter and exclude files with Wack in the name, or ending with .pshh, in addition to default exclude list. 
 
 .EXAMPLE
-    .\PowerSack.ps1 -HostListFile .\hosts.txt -KeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -Verbose 4>&1 | Out-File powersackresults.txt
-    Same as example 1 but include verbose details, redirect verbose and stdout to a file. FTW!
+    .\PowerSack.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -Verbose 4>&1 | Out-File powersackresults.txt
+    Same as example 1 but include verbose details, redirect verbose and stdout to a file. 
 
 .PARAMETER HostListFile
     A file containing a newline-separated list of hosts. Hosts can be described by IP address or a resolvable name. I don't yet support ranges, entries must be explicit. 
     EZ turn range into IP list hint: nmap -sL -n <YOUR-CIDR> | egrep -o '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'
 
-.PARAMETER KeywordListFile
-    A file containing a newline-separated list of strings to search for. Seach will be case insensitive.
+.PARAMETER FileContentsKeywordListFile
+    A file containing a newline-separated list of strings to search for in file contents and file names. Seach will be case insensitive.
+
+.PARAMETER FileNameKeywordListFile
+    A file containing a newline-separated list of strings to search for in file names, but not within file contents. Seach will be case insensitive.
+    This is useful for looking for "password", "shadow", "id_*" files etc without getting all the false positives that may occur for common or short words.
     
 .PARAMETER CredentialListFile
     A file containing a newline-separated list of credential pairs, where username and password are separated by a colon. For example:
@@ -46,24 +50,24 @@
     By default, this script ignores several file extensions, detailed in the AllFileExtensions parameter description.
     This is most commonly to filter additional extensions, like: *.dat,*.jpg,*.psd
     But can be more complex to match on the entire name: *.xlsx,Vid*.mpeg
-    Will throw a Parameter set error if used with the other name filter parameters.
 
 .PARAMETER SpecificFileNamePatterns
     Comma-separated list of filename patterns to search; anything that does not match will not be searched.
     Example: *.txt,*Financials*,*.bat,*.xml
-    Will throw a Parameter set error if used with the other name filter parameters.
+
+.PARAMETER UseBuiltinTextFilePatterns
+    To save you the hassle, the script includes a list of common text file extensions as a filter.
+    If it's missing something important let me know!
 
 .PARAMETER IgnoreShareNames
     Comma-separated list of share names to ignore. 
 
 .PARAMETER MaxFileSize
-    Maximum file size to scan. Defaults to 5MB. 
+    Maximum file size to scan. Defaults to 5MB. Probably want to make it smaller if you're on a big network.
     This thing can be an integer representing number of bytes, or human shorthand for larger quantities, like 2MB, 2GB, 2TB, etc. 
 
 .PARAMETER AllFileExtensions
-    Search through all files, regardless of extension. By default, this script ignores files ending in: 
-    ("*.dll", "*.exe", "*.msi", "*.dmg", "*.png", "*.gif", "*.mp4", "*.jpg", "*.rar", "*.zip", "*.iso", "*.bin", "*.avi", "*.mkv")
-    Will throw a Parameter set error if used with the other name filter parameters.
+    Search through all files, regardless of extension. By default, this script ignores files with extensions indicating they're not text.
 
 .PARAMETER ShowShareRootContents
     If a share was accessible, print its root directory contents. This is on by default if you do -InfoOnly, but not if you're doing a keyword scan.
@@ -89,10 +93,12 @@
 param(
     [Parameter(Mandatory=$True)]
     [string] $HostListFile,
-    [string] $KeywordListFile,
+    [string] $FileContentsKeywordListFile,
+    [string] $FileNameKeywordListFile,
     [string] $CredentialListFile,
     [string []] $IgnoreFileNamePatterns,
     [string []] $SpecificFileNamePatterns,
+    [switch] $UseBuiltinTextFilePatterns,
     [switch] $AllFileExtensions,
     [string []] $IgnoreShareNames,
     [switch] $InfoOnly,
@@ -102,11 +108,16 @@ param(
 )
 
 $AutoExcludedExtensions = @("*.dll.*", "*.dll", "*.exe.*", "*.exe", "*.msi", "*.dmg", "*.png", "*.pdb", "*.pdb.*", "*.gif", "*.h", "*.mp4", "*.adml", "*.jpg", "*.rar", "*.zip", "*.iso", "*.bin", "*.avi", "*.mkv", "*.git", "*.svn", "*.7z")
-$AutoExcludedShares = @("C$", "ADMIN$", "print$")
+$AutoExcludedShares = @("C$", "ADMIN$", "print$", "Users")
+
+$BuiltinTextFilePatterns = @("*.txt", "*.bat", "*.ps1", "*.config", "*.conf", "*.cnf", "*.cfg", "*.settings", "*.xml", "*.doc", "*.csv", "*.ini", "*.yaml", "*.json", "shadow", "*.log", "*.crt", "*.pem")
 
 $Hosts = @()
-$Keywords = @()
 $Credentials = @()
+$IgnoredShares = @()
+$ContentKeywords = @()
+$FileNameKeywords = @()
+$IncludeNamePatterns = @()
 
 ############ Validate Input Parameters #$#####
 try 
@@ -115,9 +126,13 @@ try
     {
       $Hosts = Get-Content -Path $HostListFile -ErrorAction Stop
     }
-    if($KeywordListFile)
+    if($FileContentsKeywordListFile)
     {
-      $Keywords = Get-Content -Path $KeywordListFile -ErrorAction Stop
+      $ContentKeywords = Get-Content -Path $FileContentsKeywordListFile -ErrorAction Stop
+    }
+    if($FileNameKeywordListFile)
+    {
+      $FileNameKeywords = Get-Content -Path $FileNameKeywordListFile -ErrorAction Stop
     }
     if($CredentialListFile)
     {
@@ -126,12 +141,12 @@ try
 }
 catch [System.Exception]
 {
-    throw "An error already! The HostListFile, KeywordListFile, or CredentialListFile is _unreadable_."
+    throw "An error already! The HostListFile, FileContentsKeywordListFile, FileNameKeywordListFile or CredentialListFile is _unreadable_."
 }
 
-if ( (-not $InfoOnly) -and (-not $KeywordListFile) )
+if ( (-not $InfoOnly) -and (-not $FileContentsKeywordListFile) -and (-not $FileNameKeywordListFile) )
 {
-  throw "You have to specify either -InfoOnly or -KeywordListFile"
+  throw "You have to specify either -InfoOnly or -FileContentsKeywordListFile or -FileNameKeywordListFile"
 }
 
 #This is like ParameterSets, but uglier. There's gotta be a better way 
@@ -156,6 +171,19 @@ if($UseWindowsAuth)
 if($IgnoreShareNames)
 {
   $IgnoredShares = $AutoExcludedShares + $IgnoreShareNames
+}
+else {
+  $IgnoredShares = $AutoExcludedShares
+}
+
+#if additional name patterns are desired, add them to our list
+if($SpecificFileNamePatterns)
+{
+  $IncludeNamePatterns += $SpecificFileNamePatterns
+}
+if($UseBuiltinTextFilePatterns)
+{
+  $IncludeNamePatterns += $BuiltinTextFilePatterns
 }
 
 # robbed from https://web.archive.org/web/20150405035615/http://poshcode.org/85
@@ -254,6 +282,7 @@ foreach ($CurrentHost in $Hosts)
         #give that a second and parse the shares
         Start-Sleep -Seconds 1
         $Shares = net view \\$CurrentHost /all | where {$_ -match 'disk*'} | foreach {$_ -match '^(.+?)\s+Disk*'| out-null;$matches[1]}
+        Write-Verbose-Timestamp $Shares
         $FilteredShares = $Shares | Where-Object {$_ -notin $IgnoredShares } 
 
         $PrintableShares = $Shares -join ', '
@@ -261,7 +290,7 @@ foreach ($CurrentHost in $Hosts)
 
         Write-Verbose-Timestamp("Found the following shares: $PrintableShares")
         Write-Verbose-Timestamp("After share filtering, only scanning files in: $PrintableFilteredShares")
-        
+
         foreach ($CurrentShare in $Shares)
         {
             #if the share isn't in the access table as a key, add that with an empty list val.
@@ -299,13 +328,26 @@ foreach ($CurrentHost in $Hosts)
             
             $AllFSObjects = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {$_.FullName -notin $NameScanned }
 
+
+            Write-Output-Timestamp "Your list of FileNameKeywords is $FileNameKeywords"
+            Write-Output-Timestamp "Your list of ContentKeywords is $ContentKeywords"
+
             #check keyword matches in filenames
             foreach($FSObject in $AllFSObjects)
             {
-                foreach ($CurrentKeyword in $Keywords)
+                foreach ($CurrentKeyword in $ContentKeywords)
                 {
                     $WildCardKeyword = "*" + $CurrentKeyword + "*"
                     if ($FSObject.Name -like $WildCardKeyword)
+                    {
+                        $FSObjectPath = $FSObject.FullName
+                        Write-Output "Keyword match in filesystem path: $FSObjectPath" 
+                        $NameScanned += $FSObjectPath
+                    }
+                }
+                foreach ($CurrentKeyword in $FileNameKeywords)
+                {
+                    if ($FSObject.Name -like $CurrentKeyword)
                     {
                         $FSObjectPath = $FSObject.FullName
                         Write-Output "Keyword match in filesystem path: $FSObjectPath" 
@@ -323,7 +365,11 @@ foreach ($CurrentHost in $Hosts)
             {
                 if($SpecificFileNamePatterns)
                 {
-                    $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -File -Force -ErrorAction SilentlyContinue -Include $SpecificFileNamePatterns 
+                    $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -File -Force -ErrorAction SilentlyContinue -Include $IncludeNamePatterns 
+                }
+                elseif($UseBuiltinTextFilePatterns)
+                {
+                    $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -File -Force -ErrorAction SilentlyContinue -Include $IncludeNamePatterns 
                 }
                 else 
                 {
@@ -338,7 +384,7 @@ foreach ($CurrentHost in $Hosts)
             $FilteredFiles = $FilteredFiles | Where-Object {$_.FullName -notin $ScannedFiles}
 
             #ok actually search now
-            foreach($CurrentKeyword in $Keywords)
+            foreach($CurrentKeyword in $ContentKeywords)
             {
                 foreach($FFile in $FilteredFiles)
                 {
