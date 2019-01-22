@@ -110,7 +110,7 @@ param(
 $AutoExcludedExtensions = @("*.dll.*", "*.dll", "*.exe.*", "*.exe", "*.msi", "*.dmg", "*.png", "*.pdb", "*.pdb.*", "*.gif", "*.h", "*.mp4", "*.adml", "*.jpg", "*.rar", "*.zip", "*.iso", "*.bin", "*.avi", "*.mkv", "*.git", "*.svn", "*.7z")
 $AutoExcludedShares = @("C$", "ADMIN$", "print$", "Users")
 
-$BuiltinTextFilePatterns = @("*.txt", "*.bat", "*.ps1", "*.config", "*.conf", "*.cnf", "*.cfg", "*.settings", "*.xml", "*.doc", "*.csv", "*.ini", "*.yaml", "*.json", "shadow", "*.log", "*.crt", "*.pem")
+$BuiltinTextFilePatterns = @("*.txt", "*.bat", "*.ps1", "*.config", "*.conf", "*.cnf", "*.cfg", "*.settings", "*.xml", "*.doc", "*.csv", "*.ini", "*.yaml", "*.json", "*.log", "*.crt", "*.pem")
 
 $Hosts = @()
 $Credentials = @()
@@ -327,10 +327,6 @@ foreach ($CurrentHost in $Hosts)
             }
             
             $AllFSObjects = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {$_.FullName -notin $NameScanned }
-
-
-            Write-Output-Timestamp "Your list of FileNameKeywords is $FileNameKeywords"
-            Write-Output-Timestamp "Your list of ContentKeywords is $ContentKeywords"
 
             #check keyword matches in filenames
             foreach($FSObject in $AllFSObjects)

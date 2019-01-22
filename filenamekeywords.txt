@@ -6,4 +6,5 @@ passwd
 *.key
 *.pem
 *.pfx
+*.ppk
 users*.xml
