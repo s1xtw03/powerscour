@@ -385,7 +385,7 @@ foreach ($CurrentHost in $Hosts)
                 foreach($FFile in $FilteredFiles)
                 {
                     try {
-                      Select-String -ErrorAction 'Stop'-pattern "$CurrentKeyword" $FFile
+                      Select-String -ErrorAction 'Stop' -pattern "$CurrentKeyword" $FFile
                       $ScannedFiles += $FFile.FullName
                     }
                     catch{
