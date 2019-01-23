@@ -379,18 +379,18 @@ foreach ($CurrentHost in $Hosts)
             #and no repeats.
             $FilteredFiles = $FilteredFiles | Where-Object {$_.FullName -notin $ScannedFiles}
 
+            #build a regex with all the keywords 
+            [regex] $KeywordsRegex = '(?i)(' + (($ContentKeywords | foreach {[regex]::escape($_)}) -join "|") + ")"
+
             #ok actually search now
-            foreach($CurrentKeyword in $ContentKeywords)
+            foreach($FFile in $FilteredFiles)
             {
-                foreach($FFile in $FilteredFiles)
-                {
-                    try {
-                      Select-String -ErrorAction 'Stop' -pattern "$CurrentKeyword" $FFile
-                      $ScannedFiles += $FFile.FullName
-                    }
-                    catch{
-                      continue
-                    }
+                try {
+                  Select-String -ErrorAction 'Stop' -pattern $KeywordsRegex $FFile
+                  $ScannedFiles += $FFile.FullName
+                }
+                catch{
+                  continue
                 }
             }
         }
