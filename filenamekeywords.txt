@@ -2,7 +2,7 @@
 id_*
 *assword*
 shadow
-passwd
+*redential*
 *.key
 *.pem
 *.pfx

@@ -1,16 +1,16 @@
 <#
 .SYNOPSIS
-    This script attempts to search files on SMB shares for strings of text. It takes a list of hosts, a list of credentials to try authenticating with, and a list of strings to search for.  
+    This script attempts to list and/or search files on SMB shares. It takes a list of hosts, a list of credentials to try authenticating with, and a list of strings to search for. 
 
 .DESCRIPTION
-    We want to try every share, with every set of credentials, and we don't want to spend much time looking through large files or binary stuff.
+    We want to try every share, with every set of credentials, and we don't want to spend much time looking through large files or binary stuff. 
 
 .EXAMPLE
-    .\PowerSack.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt
+    .\PowerSack.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -Verbose
     Authenticate to all of the hosts listed in hosts.txt as all of the users in credentials.txt, and search for all of the strings listed in keywords.txt 
 
 .EXAMPLE 
-    .\PowerSack.ps1 -HostlistFIle .\hosts.txt -CredentialListFile .\credentials.txt -InfoOnly
+    .\PowerSack.ps1 -HostlistFile .\hosts.txt -UseWindowsAuth -InfoOnly -Verbose
     Authenticate to shares as the current shell user and skip scanning - return information about user access and a file list for each share.
     Recommended to run this first if you're in a large, unfamiliar environment.
 
@@ -73,21 +73,22 @@
     If a share was accessible, print its root directory contents. This is on by default if you do -InfoOnly, but not if you're doing a keyword scan.
 
 .LINK
-    https://www.youtube.com/watch?v=nA5WsSyO2BM
+    https://youtu.be/E1tOV7y94DY
 .LINK
-    https://en.wikipedia.org/wiki/Acabou_Chorare
+    https://youtu.be/nA5WsSyO2BM
 .LINK
-    https://en.wikipedia.org/wiki/A_Tabua_de_Esmeralda
+    https://youtu.be/uCazqu2Xfs4
 #>
 #To see the help page formatted nicely, Run:  Get-Help .\PowerSack.ps1 -Full
 
 ##TODO Provide different filters for extensions/names
 ##TODO Can I scan filenames and contents at the same time
-##TODO Use Windows Auth Too ANd UnAuth 
+##TODO Try UnAuth 
 ##TODO Better way to handle file read errors (-ErrorAction Silently COntinue?)
 ##TODO add some default keywords
 ##TODO Use PSDrive instead of net use /view
 ##TODO Choose user for TLD 
+##TODO #1 Forgot About Share Root Files
 
 [CmdletBinding()]
 param(
@@ -107,9 +108,9 @@ param(
     $MaxFileSize=5MB
 )
 
+############ Pollute the global namespace #$#####
 $AutoExcludedExtensions = @("*.dll.*", "*.dll", "*.exe.*", "*.exe", "*.msi", "*.dmg", "*.png", "*.pdb", "*.pdb.*", "*.gif", "*.h", "*.mp4", "*.adml", "*.jpg", "*.rar", "*.zip", "*.iso", "*.bin", "*.avi", "*.mkv", "*.git", "*.svn", "*.7z")
 $AutoExcludedShares = @("C$", "ADMIN$", "print$", "Users")
-
 $BuiltinTextFilePatterns = @("*.txt", "*.bat", "*.ps1", "*.config", "*.conf", "*.cnf", "*.cfg", "*.settings", "*.xml", "*.doc", "*.csv", "*.ini", "*.yaml", "*.json", "*.log", "*.crt", "*.pem")
 
 $Hosts = @()
@@ -129,6 +130,7 @@ try
     if($FileContentsKeywordListFile)
     {
       $ContentKeywords = Get-Content -Path $FileContentsKeywordListFile -ErrorAction Stop
+      [regex] $KeywordsRegex = '(?i)(' + (($ContentKeywords | foreach {[regex]::escape($_)}) -join "|") + ")"
     }
     if($FileNameKeywordListFile)
     {
@@ -186,6 +188,11 @@ if($UseBuiltinTextFilePatterns)
   $IncludeNamePatterns += $BuiltinTextFilePatterns
 }
 
+#using these lists to keep track of what we have already scanned for output trimming
+$ScannedFiles = @()
+$NameScanned = @()
+
+
 # robbed from https://web.archive.org/web/20150405035615/http://poshcode.org/85
 # this is used because `net use` has a long timeout for failed connections
 function Test-SMBPortConnection
@@ -230,21 +237,98 @@ function Write-Output-Timestamp
   Write-Output "[$Timestamp] $Message"
 }
 
-Write-Output-Timestamp "Starting scan!" 
+function FileNameScan
+{
+    Param($CurrentDirectoryFileObjects)
+
+    foreach($FSObject in $CurrentDirectoryFileObjects)
+    {
+        foreach ($CurrentKeyword in $ContentKeywords)
+        {
+            $WildCardKeyword = "*" + $CurrentKeyword + "*"
+            if ($FSObject.Name -like $WildCardKeyword)
+            {
+                $FSObjectPath = $FSObject.FullName
+                Write-Output "Keyword match in filesystem path: $FSObjectPath" 
+                $NameScanned += $FSObjectPath
+            }
+        }
+        foreach ($CurrentKeyword in $FileNameKeywords)
+        {
+            if ($FSObject.Name -like $CurrentKeyword)
+            {
+                $FSObjectPath = $FSObject.FullName
+                Write-Output "Keyword match in filesystem path: $FSObjectPath" 
+                $NameScanned += $FSObjectPath
+            }
+        }
+    }
+}
+
+function FilterFiles
+{
+    Param($CurrentHost, $CurrentShare, $CurrentDirectory)
+
+    if ($AllFileExtensions) #why? whatever man 
+    {
+        $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare\$CurrentDirectory -Recurse -Force -ErrorAction SilentlyContinue 
+    }
+    else 
+    {
+        if($SpecificFileNamePatterns)
+        {
+            $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare\$CurrentDirectory -Recurse -File -Force -ErrorAction SilentlyContinue -Include $IncludeNamePatterns 
+        }
+        elseif($UseBuiltinTextFilePatterns)
+        {
+            $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare\$CurrentDirectory -Recurse -File -Force -ErrorAction SilentlyContinue -Include $IncludeNamePatterns 
+        }
+        else 
+        {
+            $IgnoredPatterns = $IgnoreFileNamePatterns + $AutoExcludedExtensions
+            $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare\$CurrentDirectory -Recurse -File -Force -ErrorAction SilentlyContinue -Exclude $IgnoredPatterns 
+        }
+    }
+
+    #no more large files
+    $FilteredFiles = $FilteredFiles | Where-Object {$_.Length -lt $MaxFileSize}
+    #and no repeats.
+    $FilteredFiles = $FilteredFiles | Where-Object {$_.FullName -notin $ScannedFiles}
+
+    return $FilteredFiles
+}
+
+function FileContentsSearch
+{
+    Param($FileObjects)
+
+    #ok actually search now
+    foreach($FFile in $FileObjects)
+    {
+        try {
+          Select-String -ErrorAction 'Stop' -pattern $KeywordsRegex $FFile
+          $ScannedFiles += $FFile.FullName
+        }
+        catch{
+          continue
+        }
+    }
+}
+
+Write-Output-Timestamp("Starting scan!")
 
 foreach ($CurrentHost in $Hosts)
 {
-    Write-Verbose-Timestamp "Connecting to $CurrentHost..."
+    $ScannedFiles = @()
+    $NameScanned = @()
+
+    Write-Verbose-Timestamp("************ Connecting to $CurrentHost...")
     #check connection quickly
     if (-Not (Test-SMBPortConnection($CurrentHost)))
     {
         Write-Verbose "Could not connect to port 445 on $CurrentHost. Moving on."
         continue
     }
-
-    #using these lists to keep track of what we have already scanned for output trimming
-    $ScannedFiles = @()
-    $NameScanned = @()
 
     #Hashmap where ShareName is key, list of users with access is value.
     $AccessTable = @{}
@@ -282,14 +366,17 @@ foreach ($CurrentHost in $Hosts)
         #give that a second and parse the shares
         Start-Sleep -Seconds 1
         $Shares = net view \\$CurrentHost /all | where {$_ -match 'disk*'} | foreach {$_ -match '^(.+?)\s+Disk*'| out-null;$matches[1]}
-        Write-Verbose-Timestamp $Shares
         $FilteredShares = $Shares | Where-Object {$_ -notin $IgnoredShares } 
 
         $PrintableShares = $Shares -join ', '
         $PrintableFilteredShares = $FilteredShares -join ', '
 
         Write-Verbose-Timestamp("Found the following shares: $PrintableShares")
-        Write-Verbose-Timestamp("After share filtering, only scanning files in: $PrintableFilteredShares")
+
+        if(-Not ($InfoOnly))
+        {
+            Write-Verbose-Timestamp("After share filtering, only scanning files in: $PrintableFilteredShares")
+        }
 
         foreach ($CurrentShare in $Shares)
         {
@@ -298,6 +385,8 @@ foreach ($CurrentHost in $Hosts)
             {
               $AccessTable[$CurrentShare] = @(@(), @())
             }
+
+            Write-Verbose-Timestamp("****** Starting : $CurrentShare")
 
             #test if I have read access
             try 
@@ -314,84 +403,32 @@ foreach ($CurrentHost in $Hosts)
             }
             catch
             {
-                #$ErrorMessage = $_.Exception.Message
-                #Write-Verbose-Timestamp("Error: $ErrorMessage")
                 Write-Verbose-Timestamp("$CurrentUser does not have read access to $CurrentShare")
                 continue
             }
 
-            if($InfoOnly) { continue }
+            if($InfoOnly) { 
+                Write-Verbose-Timestamp("****** Finished : $CurrentShare")
+                continue 
+            }
+
             if( -Not ($FilteredShares -Contains $CurrentShare)) { 
               Write-Verbose-Timestamp("Not scanning files in $CurrentShare as due to filter")
               continue 
             }
-            
-            $AllFSObjects = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {$_.FullName -notin $NameScanned }
 
-            #check keyword matches in filenames
-            foreach($FSObject in $AllFSObjects)
+            foreach($CurrentDirectory in $TopLevelDirectories)
             {
-                foreach ($CurrentKeyword in $ContentKeywords)
-                {
-                    $WildCardKeyword = "*" + $CurrentKeyword + "*"
-                    if ($FSObject.Name -like $WildCardKeyword)
-                    {
-                        $FSObjectPath = $FSObject.FullName
-                        Write-Output "Keyword match in filesystem path: $FSObjectPath" 
-                        $NameScanned += $FSObjectPath
-                    }
-                }
-                foreach ($CurrentKeyword in $FileNameKeywords)
-                {
-                    if ($FSObject.Name -like $CurrentKeyword)
-                    {
-                        $FSObjectPath = $FSObject.FullName
-                        Write-Output "Keyword match in filesystem path: $FSObjectPath" 
-                        $NameScanned += $FSObjectPath
-                    }
-                }
-            }
+                Write-Verbose-Timestamp("Mapping directory: $CurrentDirectory")
+                $CurrentDirectoryFileObjects = Get-Childitem -path \\$CurrentHost\$CurrentShare\$CurrentDirectory -Recurse -Force -ErrorAction SilentlyContinue | Where-Object {$_.FullName -notin $NameScanned }
 
-            ########File Filtering Time!!!!!!!!
-            if ($AllFileExtensions) #why? whatever man 
-            {
-                $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -File -Recurse -Force -ErrorAction SilentlyContinue
-            }
-            else 
-            {
-                if($SpecificFileNamePatterns)
-                {
-                    $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -File -Force -ErrorAction SilentlyContinue -Include $IncludeNamePatterns 
-                }
-                elseif($UseBuiltinTextFilePatterns)
-                {
-                    $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -File -Force -ErrorAction SilentlyContinue -Include $IncludeNamePatterns 
-                }
-                else 
-                {
-                    $IgnoredPatterns = $IgnoreFileNamePatterns + $AutoExcludedExtensions
-                    $FilteredFiles = Get-Childitem -path \\$CurrentHost\$CurrentShare -Recurse -File -Force -ErrorAction SilentlyContinue -Exclude $IgnoredPatterns 
-                }
-            }
-
-            #no more large files
-            $FilteredFiles = $FilteredFiles | Where-Object {$_.Length -lt $MaxFileSize}
-            #and no repeats.
-            $FilteredFiles = $FilteredFiles | Where-Object {$_.FullName -notin $ScannedFiles}
-
-            #build a regex with all the keywords 
-            [regex] $KeywordsRegex = '(?i)(' + (($ContentKeywords | foreach {[regex]::escape($_)}) -join "|") + ")"
-
-            #ok actually search now
-            foreach($FFile in $FilteredFiles)
-            {
-                try {
-                  Select-String -ErrorAction 'Stop' -pattern $KeywordsRegex $FFile
-                  $ScannedFiles += $FFile.FullName
-                }
-                catch{
-                  continue
-                }
+                #check keyword matches in filenames
+                FileNameScan($CurrentDirectoryFileObjects)
+                
+                #filter files by user pref
+                $FilteredFiles = FilterFiles $CurrentHost $CurrentShare $CurrentDirectory
+               
+                FileContentsSearch($FilteredFiles)
             }
         }
 
