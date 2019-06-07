@@ -7,7 +7,7 @@
 
 .EXAMPLE
     .\PowerSack.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -Verbose
-    Authenticate to all of the hosts listed in hosts.txt as all of the users in credentials.txt, and search for all of the strings listed in keywords.txt 
+    Authenticate to all of the hosts listed in hosts.txt as all of the users in credentials.txt, and search for all of the strings listed in keywords.txt. Print connection details.
 
 .EXAMPLE 
     .\PowerSack.ps1 -HostlistFile .\hosts.txt -UseWindowsAuth -InfoOnly -Verbose
@@ -24,7 +24,7 @@
 
 .PARAMETER HostListFile
     A file containing a newline-separated list of hosts. Hosts can be described by IP address or a resolvable name. I don't yet support ranges, entries must be explicit. 
-    EZ turn range into IP list hint: nmap -sL -n <YOUR-CIDR> | egrep -o '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'
+    EZ turn range into IP list: nmap -sL -n <YOUR-CIDR> | egrep -o '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}'
 
 .PARAMETER FileContentsKeywordListFile
     A file containing a newline-separated list of strings to search for in file contents and file names. Seach will be case insensitive.
@@ -88,7 +88,6 @@
 ##TODO add some default keywords
 ##TODO Use PSDrive instead of net use /view
 ##TODO Choose user for TLD 
-##TODO #1 Forgot About Share Root Files
 
 [CmdletBinding()]
 param(
