@@ -1,4 +1,5 @@
 #View shares as current user
+#Once, a person said, "give me a script so I can scan for fileshares like you", so I provided this.
 #Recommended to use verbose flag and pipe output to file:
 # ./ShareTable.ps1 -Verbose -HostListFile ./servers.txt > sharesaccess.txt
 
