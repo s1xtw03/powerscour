@@ -16,6 +16,8 @@ Common discoveries include
 
 **For a complete list of options and examples, check out its help page with `Get-Help .\PowerSack.ps1 -Full`**
 
+![Introduction](https://gitlab.na.nccgroup.com/jmcg/powersack/raw/f4eb0dd4632964da96c621434e1976ba2ce9026d/fan_art/fan_art2.jpg)
+
 On a large or unfamiliar network, it's usually best to start with an information-only scan, which will return a list of the shares on each host, along with the files present in the share root. It's also recommended to use the Verbose flag so you can keep an eye on overall progress, and redirect stdout to a file. 
 
 Sample information gathering search:
