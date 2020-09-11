@@ -1,6 +1,6 @@
 # powersack
 
-![Fan Art!](https://github.com/s1xtw03/powersack/raw/master/fan_art/fan_art2.jpg =250x)
+<img src="https://github.com/s1xtw03/powersack/raw/master/fan_art/fan_art2.jpg" width="200">
 
 This script attempts to "ransack" files on SMB shares for strings of text. It takes a list of hosts, a list of credentials to try authenticating with, and a list of strings to search for. All testing was performed on Powershell version 5, though you may have luck on earlier versions.
 
