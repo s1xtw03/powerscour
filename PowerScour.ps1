@@ -6,20 +6,20 @@
     We want to try every share, with every set of credentials, and we don't want to spend much time looking through large files or binary stuff. 
 
 .EXAMPLE
-    .\PowerSack.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -Verbose
+    .\PowerScour.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -Verbose
     Authenticate to all of the hosts listed in hosts.txt as all of the users in credentials.txt, and search for all of the strings listed in keywords.txt. Print connection details.
 
 .EXAMPLE 
-    .\PowerSack.ps1 -HostlistFile .\hosts.txt -UseWindowsAuth -InfoOnly -Verbose
+    .\PowerScour.ps1 -HostlistFile .\hosts.txt -UseWindowsAuth -InfoOnly -Verbose
     Authenticate to shares as the current shell user and skip scanning - return information about user access and a file list for each share.
     Recommended to run this first if you're in a large, unfamiliar environment.
 
 .EXAMPLE
-    .\PowerSack.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -MaxFileSize 200MB -IgnoreFileNamePatterns *.pshh,*Wack*
+    .\PowerScour.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -MaxFileSize 200MB -IgnoreFileNamePatterns *.pshh,*Wack*
     Same as above but increase file size filter and exclude files with Wack in the name, or ending with .pshh, in addition to default exclude list. 
 
 .EXAMPLE
-    .\PowerSack.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -Verbose 4>&1 | Out-File powersackresults.txt
+    .\PowerScour.ps1 -HostListFile .\hosts.txt -FileContentsKeywordListFile .\keywords.txt -CredentialListFile .\credentials.txt -Verbose 4>&1 | Out-File powerScourresults.txt
     Same as example 1 but include verbose details, redirect verbose and stdout to a file. 
 
 .PARAMETER HostListFile
@@ -79,7 +79,7 @@
 .LINK
     https://youtu.be/VK8HNwqZgF8
 #>
-#To see the help page formatted nicely, Run:  Get-Help .\PowerSack.ps1 -Full
+#To see the help page formatted nicely, Run:  Get-Help .\PowerScour.ps1 -Full
 
 ##TODO Provide different filters for extensions/names
 ##TODO Can I scan filenames and contents at the same time
