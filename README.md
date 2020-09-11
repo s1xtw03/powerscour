@@ -4,7 +4,7 @@
 
 This script attempts to "ransack" files on SMB shares for strings of text. It takes a list of hosts, a list of credentials to try authenticating with, and a list of strings to search for. All testing was performed on Powershell version 5, though you may have luck on earlier versions.
 
-This technique has a very high rate of successful privilege escalation once a set of domain credentials are discovered. Organizations do not typically give much attention to how their staff set ACLs on network shares. As we so frequently gather many sets of credentials, this tool helps determine which have access to given shares.
+This technique has a high rate of successful privilege escalation and discovery of mishandled data once a set of domain credentials are obtained. As we so frequently gather many sets of credentials, this tool helps determine which have access to given shares.
 
 Common discoveries include
 
@@ -18,7 +18,7 @@ Common discoveries include
 
 **For a complete list of options and examples, check out its help page with `Get-Help .\PowerSack.ps1 -Full`**
 
-![Introduction](https://gitlab.na.nccgroup.com/jmcg/powersack/raw/f4eb0dd4632964da96c621434e1976ba2ce9026d/fan_art/fan_art2.jpg)
+## Introduction
 
 On a large or unfamiliar network, it's usually best to start with an information-only scan, which will return a list of the shares on each host, along with the files present in the share root. It's also recommended to use the Verbose flag so you can keep an eye on overall progress, and redirect stdout to a file. 
 
