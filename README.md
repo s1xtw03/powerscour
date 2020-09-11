@@ -1,8 +1,8 @@
-# powersack
+# powerscour
 
-<img src="https://github.com/s1xtw03/powersack/raw/master/fan_art/fan_art2.jpg" width="200">
+<img src="https://github.com/s1xtw03/powerscour/raw/master/fan_art/fan_art2.jpg" width="200">
 
-This script attempts to "ransack" files on SMB shares for strings of text. It takes a list of hosts, a list of credentials to try authenticating with, and a list of strings to search for. All testing was performed on Powershell version 5, though you may have luck on earlier versions.
+This script attempts to search files on SMB shares for strings of text. It takes a list of hosts, a list of credentials to try authenticating with, and a list of strings to search for. All testing was performed on Powershell version 5, though you may have luck on earlier versions.
 
 This technique has a high rate of successful privilege escalation and discovery of mishandled data once a set of domain credentials are obtained. As we so frequently gather many sets of credentials, this tool helps determine which have access to given shares.
 
@@ -16,7 +16,7 @@ Common discoveries include
 * Bulk regulated data (medical, legal, HR)
 * Private keys
 
-**For a complete list of options and examples, check out its help page with `Get-Help .\PowerSack.ps1 -Full`**
+**For a complete list of options and examples, check out its help page with `Get-Help .\PowerScour.ps1 -Full`**
 
 ## Introduction
 
@@ -25,7 +25,7 @@ On a large or unfamiliar network, it's usually best to start with an information
 Sample information gathering search:
 
 ~~~
-PS p:\> .\PowerSack.ps1 -HostListFile C:\Users\jmcg\Desktop\dev-sharehosts.txt -CredentialListFile C:\Users\jmcg\Desktop\dev-sharecreds.txt -Verbose -InfoOnly
+PS p:\> .\PowerScour.ps1 -HostListFile C:\Users\jmcg\Desktop\dev-sharehosts.txt -CredentialListFile C:\Users\jmcg\Desktop\dev-sharecreds.txt -Verbose -InfoOnly
 [06/17 21:31:44] Starting scan!
 
 VERBOSE: [06/17 21:31:45] ************ Connecting to WIN-S35BCPQ74FS...
@@ -72,7 +72,7 @@ ADMIN$
 Simple search usage demo:
 
 ~~~
-PS p:\> .\PowerSack.ps1 -HostListFile C:\Users\jmcg\Desktop\dev-sharehosts.txt -Verbose -CredentialListFile C:\Users\jmcg\Desktop\dev-sharecreds.txt -FileContentsKeywordListFile .\contentkeywords.txt -FileNameKeywordListFile .\filenamekeywords.txt
+PS p:\> .\PowerScour.ps1 -HostListFile C:\Users\jmcg\Desktop\dev-sharehosts.txt -Verbose -CredentialListFile C:\Users\jmcg\Desktop\dev-sharecreds.txt -FileContentsKeywordListFile .\contentkeywords.txt -FileNameKeywordListFile .\filenamekeywords.txt
 [06/17 21:13:33] Starting scan!
 VERBOSE: [06/17 21:13:33] ************ Connecting to 192.168.178.128...
 VERBOSE: Could not connect to port 445 on 192.168.178.128. Moving on.
